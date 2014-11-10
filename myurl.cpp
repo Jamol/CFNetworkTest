@@ -2,8 +2,8 @@
  *  myurl.cpp
  *  httptest
  *
- *  Created by apple on 11-5-23.
- *  Copyright 2011 __MyCompanyName__. All rights reserved.
+ *  Created by Fengping Bao <jamol@live.com> on 11-5-23.
+ *  Copyright 2011. All rights reserved.
  *
  */
 
