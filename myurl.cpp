@@ -614,7 +614,7 @@ void DelProxyCredentials(CFHTTPAuthenticationRef authRef);
 void AddProxyAuthentication(CFHTTPAuthenticationRef authRef)
 {
     if(NULL == g_proxyAuthArray) {
-		g_proxyAuthArray = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+		g_proxyAuthArray = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
     }
 	CFArrayAppendValue(g_proxyAuthArray, authRef);
 }
@@ -635,7 +635,7 @@ void DelProxyAuthentication(CFHTTPAuthenticationRef authRef)
 void AddProxyCredentials(CFHTTPAuthenticationRef authRef, CFMutableDictionaryRef credentials)
 {
     if(NULL == g_proxyCredDict) {
-		g_proxyCredDict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+		g_proxyCredDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     }
 	CFDictionarySetValue(g_proxyCredDict, authRef, credentials);
 }
