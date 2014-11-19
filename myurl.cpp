@@ -47,7 +47,7 @@ enum {
 #include <asl.h>
 aslclient log_client;
 bool log_initialized = false;
-void my_printf(int level, char* fmt, ...)
+void my_printf(int level, const char* fmt, ...)
 {
     va_list VAList;
     char szMsgBuf[2048] = {0};
@@ -63,17 +63,13 @@ void my_printf(int level, char* fmt, ...)
     {
         case MY_TRACE_LEVEL_INFO:
             printf("%s\n", szMsgBuf);
-            asl_log(log_client, NULL, ASL_LEVEL_EMERG, szMsgBuf);
-            //WTP_INFOTRACE(szMsgBuf);
+            //asl_log(log_client, NULL, ASL_LEVEL_EMERG, szMsgBuf);
             break;
         case MY_TRACE_LEVEL_WARN:
-            //WTP_WARNTRACE(szMsgBuf);
             break;
         case MY_TRACE_LEVEL_ERR:
-            //WTP_ERRTRACE(szMsgBuf);
             break;
         default:
-            //WTP_INFOTRACE(szMsgBuf);
             break;
     }
 }
@@ -208,6 +204,7 @@ int MY_Url_Object::post(const char* uri, uint8_t* data, uint32_t len)
 
 int MY_Url_Object::streamPost(const char* uri, uint32_t content_length)
 {
+    MY_TRACE("MY_Url_Object::streamPost, this=%lx, uri=%s, content_length=%u", (unsigned long)this, uri, content_length);
     int sockets[2];
     int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
     if(ret < 0) {
@@ -306,7 +303,7 @@ int MY_Url_Object::streamPost(const char* uri, uint32_t content_length)
         cleanup();
         return -1;
     }
-    MY_TRACE("reqReadStream=%lx, readStream=%lx", m_reqBodyReadStream, m_readStreamRef);
+    MY_TRACE("MY_Url_Object::streamPost, reqReadStream=%lx, readStream=%lx", m_reqBodyReadStream, m_readStreamRef);
     return 0;
 }
 
@@ -373,7 +370,7 @@ int MY_Url_Object::sendBody(uint8_t* data, uint32_t len)
     if(ret > 0) {
         m_send_length += ret;
         if(m_send_length >= m_content_length)
-        {// 03/02/2009, Folki+, don't close read stream. Sync from iphone team
+        {// don't close read stream
             CFWriteStreamSetClient(m_reqBodyWriteStream, NULL, NULL, NULL);
             CFWriteStreamUnscheduleFromRunLoop(m_reqBodyWriteStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
             CFWriteStreamClose(m_reqBodyWriteStream);
@@ -385,106 +382,94 @@ int MY_Url_Object::sendBody(uint8_t* data, uint32_t len)
 }
 
 // return true means need proxy authentication
-bool MY_Url_Object::tryHandleProxy()
+bool MY_Url_Object::tryHandleProxy(CFHTTPMessageRef responseHeader)
 {
-	CFHTTPMessageRef responseHeader = NULL;
-	responseHeader = (CFHTTPMessageRef)CFReadStreamCopyProperty(
-																m_readStreamRef,
-																kCFStreamPropertyHTTPResponseHeader
-																);
-	if(responseHeader)
-	{
-		//if (CFHTTPMessageIsHeaderComplete(responseHeader))
-		{
-			UInt32	statCode = CFHTTPMessageGetResponseStatusCode(responseHeader);
-			if(statCode == 401 || statCode == 407)
-			{
-				g_bHasProxy = true;
-				MY_TRACE("MY_Url_Object::tryHandleProxy, ACCOUNTS AND PASSWORD REQUIRED, this=%lx, code=%d", (unsigned long)this, statCode);
-				CFHTTPAuthenticationRef authRef = FindProxyAuthenticationForRequest(m_messageRef);
-				if(NULL == authRef)
-				{
-					authRef = CFHTTPAuthenticationCreateFromResponse(NULL, responseHeader);
-					if(authRef)
-					{
-						AddProxyAuthentication(authRef);
-						CFRelease(authRef); // retained by array
-					}
-					else
-					{
-						MY_TRACE("MY_Url_Object::tryHandleProxy, failed to create proxy authentication");
-						CFRelease(responseHeader);
-						return false;
-					}
-				}
-				else
-				{
-					CFStreamError err;
-					if(!CFHTTPAuthenticationIsValid(authRef, &err))
-					{
-						DelProxyAuthentication(authRef);
-						if (err.domain == kCFStreamErrorDomainHTTP &&
-							(err.error == kCFStreamErrorHTTPAuthenticationBadUserName ||
-							 err.error == kCFStreamErrorHTTPAuthenticationBadPassword)) {
-							CFRelease(responseHeader);
-							// toss bad authentication and retry
-							MY_TRACE("MY_Url_Object::tryHandleProxy, bad user name or password");
-							return tryHandleProxy();
-						}
-						else
-						{// error occur
-							MY_TRACE("MY_Url_Object::tryHandleProxy, proxy error, err.domain=%ld, err.error=%d", err.domain, err.error);
-							CFRelease(responseHeader);
-							return false;
-						}
-					}
-				}
-				CFStringRef schemeRef = CFHTTPAuthenticationCopyMethod(authRef);
-				MY_TRACE("MY_Url_Object::tryHandleProxy, scheme=%s", (CFStringGetCStringPtr(schemeRef, kCFStringEncodingASCII)));
-                if(schemeRef && CFStringCompare(schemeRef, CFSTR("NTLM"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-					m_shouldAutoredirect = false;
+    UInt32	statCode = CFHTTPMessageGetResponseStatusCode(responseHeader);
+    if(statCode == 401 || statCode == 407)
+    {
+        g_bHasProxy = true;
+        MY_TRACE("MY_Url_Object::tryHandleProxy, ACCOUNTS AND PASSWORD REQUIRED, this=%lx, code=%d", (unsigned long)this, statCode);
+        CFHTTPAuthenticationRef authRef = FindProxyAuthenticationForRequest(m_messageRef);
+        if(NULL == authRef)
+        {
+            authRef = CFHTTPAuthenticationCreateFromResponse(NULL, responseHeader);
+            if(authRef)
+            {
+                AddProxyAuthentication(authRef);
+                CFRelease(authRef); // retained by array
+            }
+            else
+            {
+                MY_TRACE("MY_Url_Object::tryHandleProxy, failed to create proxy authentication");
+                return false;
+            }
+        }
+        else
+        {
+            CFStreamError err;
+            if(!CFHTTPAuthenticationIsValid(authRef, &err))
+            {
+                DelProxyAuthentication(authRef);
+                if (err.domain == kCFStreamErrorDomainHTTP &&
+                    (err.error == kCFStreamErrorHTTPAuthenticationBadUserName ||
+                     err.error == kCFStreamErrorHTTPAuthenticationBadPassword)) {
+                        // toss bad authentication and retry
+                        MY_TRACE("MY_Url_Object::tryHandleProxy, bad user name or password");
+                        return tryHandleProxy(responseHeader);
+                    }
+                else
+                {// error occur
+                    MY_TRACE("MY_Url_Object::tryHandleProxy, proxy error, err.domain=%ld, err.error=%d", err.domain, err.error);
+                    return false;
                 }
-				CFRelease(schemeRef);
-
-				CFMutableDictionaryRef credentials = FindProxyCredentials(authRef);
-				if(NULL == credentials && CFHTTPAuthenticationRequiresUserNameAndPassword(authRef))
-				{// try to get credentials from user
-					MY_TRACE("MY_Url_Object::tryHandleProxy, need user name & password");
-					credentials = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, 
-						&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-					CFStringRef username = CFStringCreateWithCString(NULL, g_my_username, kCFStringEncodingASCII);
-					CFDictionarySetValue(credentials, kCFHTTPAuthenticationUsername, username);
-					CFRelease(username);
-					CFStringRef password = CFStringCreateWithCString(NULL, g_my_password, kCFStringEncodingASCII);
-					CFDictionarySetValue(credentials, kCFHTTPAuthenticationPassword, password);
-					CFRelease(password);
-					if(CFHTTPAuthenticationRequiresAccountDomain(authRef))
-					{
-						MY_TRACE("MY_Url_Object::tryHandleProxy, need domain");
-						CFStringRef domain = CFStringCreateWithCString(NULL, g_proxy_domain, kCFStringEncodingASCII);
-						CFDictionarySetValue(credentials, kCFHTTPAuthenticationAccountDomain, domain);
-						CFRelease(domain);
-					}
-					AddProxyCredentials(authRef, credentials);
-					CFRelease(credentials); // It's retained in the dictionary now
-					resumeRequestWithCredentials(authRef, credentials);
-					
-					//m_nProxyState = CF_PROXY_STATE_WAITING;
-				} else {// resume with credentials
-					if(NULL == credentials) {
-						credentials = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, 
-							&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-						AddProxyCredentials(authRef, credentials);
-						CFRelease(credentials); // It's retained in the dictionary now
-					}
-					resumeRequestWithCredentials(authRef, credentials);
-				}
-				CFRelease(responseHeader);
-				return true;
-			}
-		}
-		CFRelease(responseHeader);
-	}
+            }
+            MY_TRACE("MY_Url_Object::tryHandleProxy, find AuthenticationRef");
+        }
+        CFStringRef schemeRef = CFHTTPAuthenticationCopyMethod(authRef);
+        MY_TRACE("MY_Url_Object::tryHandleProxy, scheme=%s", (CFStringGetCStringPtr(schemeRef, kCFStringEncodingASCII)));
+        if(schemeRef && CFStringCompare(schemeRef, CFSTR("NTLM"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+            m_shouldAutoredirect = false;
+        }
+        CFRelease(schemeRef);
+        
+        CFMutableDictionaryRef credentials = FindProxyCredentials(authRef);
+        if(NULL == credentials && CFHTTPAuthenticationRequiresUserNameAndPassword(authRef))
+        {// try to get credentials from user
+            MY_TRACE("MY_Url_Object::tryHandleProxy, need user name & password");
+            credentials = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                                                    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            CFStringRef username = CFStringCreateWithCString(NULL, g_my_username, kCFStringEncodingASCII);
+            CFDictionarySetValue(credentials, kCFHTTPAuthenticationUsername, username);
+            CFRelease(username);
+            CFStringRef password = CFStringCreateWithCString(NULL, g_my_password, kCFStringEncodingASCII);
+            CFDictionarySetValue(credentials, kCFHTTPAuthenticationPassword, password);
+            CFRelease(password);
+            if(CFHTTPAuthenticationRequiresAccountDomain(authRef))
+            {
+                MY_TRACE("MY_Url_Object::tryHandleProxy, need domain");
+                CFStringRef domain = CFStringCreateWithCString(NULL, g_proxy_domain, kCFStringEncodingASCII);
+                CFDictionarySetValue(credentials, kCFHTTPAuthenticationAccountDomain, domain);
+                CFRelease(domain);
+            }
+            AddProxyCredentials(authRef, credentials);
+            CFRelease(credentials); // It's retained in the dictionary now
+            resumeRequestWithCredentials(authRef, credentials);
+            
+            //m_nProxyState = CF_PROXY_STATE_WAITING;
+        } else {// resume with credentials
+            if(NULL == credentials) {
+                MY_TRACE("MY_Url_Object::tryHandleProxy, create empty credentials");
+                credentials = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, 
+                                                        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+                AddProxyCredentials(authRef, credentials);
+                CFRelease(credentials); // It's retained in the dictionary now
+            } else {
+                MY_TRACE("MY_Url_Object::tryHandleProxy, find credentials");
+            }
+            resumeRequestWithCredentials(authRef, credentials);
+        }
+        return true;
+    }
 	
 	return false;
 }
@@ -527,8 +512,21 @@ void MY_Url_Object::onReceive(int err)
 {
 	if(CF_PROXY_STATE_WAITING == m_nProxyState)
 		return;
-	if((CF_PROXY_STATE_IDLE == m_nProxyState || CF_PROXY_STATE_TRYING == m_nProxyState) && tryHandleProxy())
-		return ;
+    if(CF_PROXY_STATE_IDLE == m_nProxyState || CF_PROXY_STATE_TRYING == m_nProxyState) {
+        CFHTTPMessageRef responseHeader = NULL;
+        responseHeader = (CFHTTPMessageRef)CFReadStreamCopyProperty(m_readStreamRef,
+                                                                    kCFStreamPropertyHTTPResponseHeader
+                                                                    );
+        if(NULL == responseHeader || !CFHTTPMessageIsHeaderComplete(responseHeader)){
+            if(responseHeader) CFRelease(responseHeader);
+            return ;
+        }
+        bool ret = tryHandleProxy(responseHeader);
+        CFRelease(responseHeader);
+        if(ret) {
+            return ;
+        }
+    }
 	if(CF_PROXY_STATE_TRYING == m_nProxyState) {
 		m_nProxyState = CF_PROXY_STATE_DONE;
 		MY_TRACE("MY_Url_Object::onReceive, proxy done");

@@ -26,7 +26,7 @@ public:
 	void onClose(int err);
 	
 private:
-	bool tryHandleProxy();
+	bool tryHandleProxy(CFHTTPMessageRef responseHeader);
 	bool resumeRequestWithCredentials(CFHTTPAuthenticationRef authRef, CFDictionaryRef credentials);
     void modifySSLSettings();
     int doReadStream();
