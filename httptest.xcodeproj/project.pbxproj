@@ -10,6 +10,7 @@
 		18402A8E138A38DF00893777 /* CoreServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18402A8D138A38DF00893777 /* CoreServices.framework */; };
 		18402A95138A38F800893777 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18402A94138A38F800893777 /* SystemConfiguration.framework */; };
 		18402AC8138A4A7B00893777 /* myurl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 18402AC7138A4A7B00893777 /* myurl.cpp */; };
+		6FE56C201AEDE0FF00678826 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FE56C1F1AEDE0FF00678826 /* Security.framework */; };
 		8DD76F650486A84900D96B5E /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 08FB7796FE84155DC02AAC07 /* main.cpp */; settings = {ATTRIBUTES = (); }; };
 		8DD76F6A0486A84900D96B5E /* httptest.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = C6859E8B029090EE04C91782 /* httptest.1 */; };
 /* End PBXBuildFile section */
@@ -34,6 +35,7 @@
 		18402AC6138A4A7B00893777 /* myurl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = myurl.h; sourceTree = "<group>"; };
 		18402AC7138A4A7B00893777 /* myurl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = myurl.cpp; sourceTree = "<group>"; };
 		18402BE3138B7D3400893777 /* httptest */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = httptest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6FE56C1F1AEDE0FF00678826 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		C6859E8B029090EE04C91782 /* httptest.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = httptest.1; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -42,6 +44,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6FE56C201AEDE0FF00678826 /* Security.framework in Frameworks */,
 				18402A8E138A38DF00893777 /* CoreServices.framework in Frameworks */,
 				18402A95138A38F800893777 /* SystemConfiguration.framework in Frameworks */,
 			);
@@ -53,6 +56,7 @@
 		08FB7794FE84155DC02AAC07 /* httptest */ = {
 			isa = PBXGroup;
 			children = (
+				6FE56C1F1AEDE0FF00678826 /* Security.framework */,
 				18402A94138A38F800893777 /* SystemConfiguration.framework */,
 				18402A8D138A38DF00893777 /* CoreServices.framework */,
 				08FB7795FE84155DC02AAC07 /* Source */,

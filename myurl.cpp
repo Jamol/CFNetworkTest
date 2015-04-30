@@ -9,6 +9,7 @@
 
 #include "myurl.h"
 #include <SystemConfiguration/SystemConfiguration.h>
+#include <string>
 
 void AddProxyAuthentication(CFHTTPAuthenticationRef authRef);
 void AddProxyCredentials(CFHTTPAuthenticationRef authRef, CFMutableDictionaryRef credentials);
@@ -17,6 +18,7 @@ CFHTTPAuthenticationRef FindProxyAuthenticationForRequest(CFHTTPMessageRef reque
 CFMutableDictionaryRef FindProxyCredentials(CFHTTPAuthenticationRef authRef);
 static void ReadStreamClientCallBack(CFReadStreamRef stream, CFStreamEventType type, void *clientCallBackInfo);
 static void WriteStreamClientCallBack(CFWriteStreamRef stream, CFStreamEventType type, void *clientCallBackInfo);
+const char* CertStatusFromOSStatus(OSStatus status) ;
 
 static const CFOptionFlags kNetworkEvents =
     kCFStreamEventOpenCompleted | kCFStreamEventHasBytesAvailable | kCFStreamEventEndEncountered | kCFStreamEventErrorOccurred;
@@ -75,18 +77,18 @@ void my_printf(int level, const char* fmt, ...)
 }
 
 MY_Url_Object::MY_Url_Object()
+: m_urlRef(NULL)
+, m_messageRef(NULL)
+, m_readStreamRef(NULL)
+, m_reqBodyReadStream(NULL)
+, m_reqBodyWriteStream(NULL)
+, m_content_length(0)
+, m_send_length(0)
+, m_nProxyState(CF_PROXY_STATE_IDLE)
+, m_shouldAutoredirect(true)
+, m_checkSSL(true)
 {
-	m_urlRef = NULL;
-	m_messageRef = NULL;
-	m_readStreamRef = NULL;
-	
-    m_content_length = 0;
-    m_send_length = 0;
-    m_reqBodyReadStream = NULL;
-    m_reqBodyWriteStream = NULL;
-    
-	m_nProxyState = CF_PROXY_STATE_IDLE;
-	m_shouldAutoredirect = true;
+
 }
 
 MY_Url_Object::~MY_Url_Object()
@@ -159,9 +161,6 @@ int MY_Url_Object::get(const char* uri)
         return -1;
     }
     
-    //MY_TRACE("add header: WBX-Redirection-Address=http://eaccbmm20.webex.com:80");
-    //CFHTTPMessageSetHeaderFieldValue(m_messageRef, CFSTR("WBX-Redirection-Address"), CFSTR("http://eaccbmm20.webex.com:80"));
-	
 	CFHTTPAuthenticationRef authentication = FindProxyAuthenticationForRequest(m_messageRef);
 	if(authentication) {
 		CFMutableDictionaryRef credentials = FindProxyCredentials(authentication);
@@ -271,7 +270,7 @@ int MY_Url_Object::streamPost(const char* uri, uint32_t content_length)
         return -1;
     }
     if(m_shouldAutoredirect) {
-        //CFReadStreamSetProperty(m_readStreamRef, kCFStreamPropertyHTTPShouldAutoredirect,kCFBooleanTrue);
+        //CFReadStreamSetProperty(m_readStreamRef, kCFStreamPropertyHTTPShouldAutoredirect, kCFBooleanTrue);
     }
     
     CFDictionaryRef proxyDict = SCDynamicStoreCopyProxies(NULL);
@@ -282,7 +281,7 @@ int MY_Url_Object::streamPost(const char* uri, uint32_t content_length)
     
     CFStringRef scheme = CFURLCopyScheme(m_urlRef);
     if(scheme && CFStringCompare(scheme, CFSTR("https"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-        modifySSLSettings();
+        //modifySSLSettings();
     }
     if(scheme) {
         CFRelease(scheme);
@@ -333,7 +332,7 @@ int MY_Url_Object::doReadStream()
     
     CFStringRef scheme = CFURLCopyScheme(m_urlRef);
     if(scheme && CFStringCompare(scheme, CFSTR("https"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
-        modifySSLSettings();
+        //modifySSLSettings();
     }
     if(scheme) {
         CFRelease(scheme);
@@ -510,6 +509,11 @@ void MY_Url_Object::onSend(int err)
 
 void MY_Url_Object::onReceive(int err)
 {
+    if(m_checkSSL) {
+        m_checkSSL = false;
+        checkSSLResult();
+    }
+    
 	if(CF_PROXY_STATE_WAITING == m_nProxyState)
 		return;
     if(CF_PROXY_STATE_IDLE == m_nProxyState || CF_PROXY_STATE_TRYING == m_nProxyState) {
@@ -552,9 +556,98 @@ void MY_Url_Object::onReceive(int err)
 	}
 }
 
+static std::string GetErrorString(SecTrustRef secTrust)
+{
+    std::string errStr = "";
+    // warning: sometimes it will stuck on SecTrustCopyProperties
+    CFArrayRef arrayRef = SecTrustCopyProperties(secTrust);
+    if(arrayRef && CFArrayGetCount(arrayRef) > 0) {
+        CFDictionaryRef dictRef = (CFDictionaryRef)CFArrayGetValueAtIndex(arrayRef, 0);
+        if(dictRef) {
+            CFStringRef errRef = (CFStringRef)CFDictionaryGetValue(dictRef, kSecPropertyTypeError);
+            if(errRef) {
+                const char* cstr = CFStringGetCStringPtr(errRef, kCFStringEncodingASCII);
+                if(cstr) {
+                    errStr = cstr;
+                }
+                CFRelease(errRef);
+            }
+        }
+        CFRelease(arrayRef);
+    }
+    return errStr;
+}
+
+void MY_Url_Object::checkSSLResult()
+{
+    OSStatus status;
+    SSLContextRef sslContext = (SSLContextRef)CFReadStreamCopyProperty(m_readStreamRef, kCFStreamPropertySSLContext);
+    if(sslContext) {
+        SecTrustRef secTrust = NULL;
+        status = SSLCopyPeerTrust (sslContext, &secTrust);
+        if(secTrust) {
+            CFRelease(secTrust);
+        }
+        CFRelease(sslContext);
+    }
+    SecTrustRef secTrust = (SecTrustRef)CFReadStreamCopyProperty(m_readStreamRef, kCFStreamPropertySSLPeerTrust);
+    if(secTrust) {
+        SecTrustResultType trustResult;
+        status = SecTrustGetTrustResult(secTrust, &trustResult);
+        printf("CheckSSLResult, SecTrustGetTrustResult status=%d, result=%d\n", status, trustResult);
+        if(trustResult != kSecTrustResultUnspecified && trustResult != kSecTrustResultProceed) {
+            OSStatus cssmResult;
+            status = SecTrustGetCssmResultCode(secTrust, &cssmResult);
+            printf("cert status: %s, result=%d\n", CertStatusFromOSStatus(cssmResult), trustResult);
+            std::string errStr = GetErrorString(secTrust);
+            printf("MY_Url_Object::checkSSLResult, errStr1=%s\n", errStr.c_str());
+        } else {
+            SecCertificateRef certs[10];
+            CFIndex count = SecTrustGetCertificateCount(secTrust);
+            for (CFIndex i = 0; i < count; i++)
+            {
+                SecCertificateRef certRef = SecTrustGetCertificateAtIndex(secTrust, i);
+                certs[i] = certRef;
+                CFStringRef certSummary = SecCertificateCopySubjectSummary(certRef);
+                printf("checkSSLResult, summary=%s\n", CFStringGetCStringPtr(certSummary, kCFStringEncodingASCII));
+                CFRelease(certSummary);
+                //CFDataRef certData = SecCertificateCopyData(certRef);
+            }
+            CFArrayRef certArray = CFArrayCreate(NULL, (const void **)certs, count, NULL);
+            SecPolicyRef secPolicy = SecPolicyCreateBasicX509();
+            //SecPolicyRef secPolicy = SecPolicyCreateSSL(false, CFSTR("revoked.grc.com"));
+            SecTrustRef tmpTrust;
+            OSStatus status = SecTrustCreateWithCertificates(certArray, secPolicy, &tmpTrust);
+            status = SecTrustEvaluate(tmpTrust, &trustResult);
+            printf("CheckSSLResult, SecTrustEvaluate status=%d, result=%d\n", status, trustResult);
+            if (trustResult != kSecTrustResultUnspecified && trustResult != kSecTrustResultProceed) {
+                OSStatus cssmResult;
+                status = SecTrustGetCssmResultCode(tmpTrust, &cssmResult);
+                printf("cert is not OK, cert status: %s\n", CertStatusFromOSStatus(cssmResult));
+                std::string errStr = GetErrorString(tmpTrust);
+                printf("MY_Url_Object::checkSSLResult, errStr2=%s\n", errStr.c_str());
+            } else {
+                printf("cert is OK\n");
+            }
+            CFRelease(tmpTrust);
+            CFRelease(secPolicy);
+            CFRelease(certArray);
+        }
+        
+        CFRelease(secTrust);
+    }
+}
+
 void MY_Url_Object::onClose(int err)
 {
-	MY_TRACE("MY_Url_Object::onClose, err=%d", err);
+    CFStreamError strErr = CFReadStreamGetError(m_readStreamRef);
+    MY_TRACE("MY_Url_Object::onClose, error=%d, domain=%d", strErr.error, strErr.domain);
+    /*CFDataRef ref = (CFDataRef)CFReadStreamCopyProperty(m_readStreamRef, kCFStreamPropertySSLContext);
+    SSLContextRef contextRef;
+    CFDataGetBytes(ref, CFRangeMake(0, sizeof(SSLContextRef)), (UInt8 *)&contextRef);*/
+    if(strErr.domain == kCFStreamErrorDomainSSL) {
+        checkSSLResult();
+    }
 }
 
 static void ReadStreamClientCallBack(CFReadStreamRef stream, CFStreamEventType type, void *clientCallBackInfo)
@@ -575,7 +668,7 @@ static void ReadStreamClientCallBack(CFReadStreamRef stream, CFStreamEventType t
 			break;
 		case kCFStreamEventErrorOccurred:
 			MY_TRACE("ReadStreamClientCallBack --- error occurred, obj=%lx", (long)urlObject);
-			urlObject->onClose(0);
+			urlObject->onClose(1);
 			break;
 		case kCFStreamEventOpenCompleted:	
 			MY_TRACE("ReadStreamClientCallBack --- open complete, obj=%lx, stream=%lx", (long)urlObject, (long)stream);
@@ -666,4 +759,71 @@ CFMutableDictionaryRef FindProxyCredentials(CFHTTPAuthenticationRef authRef)
 		return NULL;
     }
 	return (CFMutableDictionaryRef)CFDictionaryGetValue(g_proxyCredDict, authRef);
+}
+
+const char* CertStatusFromOSStatus(OSStatus status) {
+    switch (status) {
+        case noErr:
+            return "CERT_STATUS_OK";
+        case CSSMERR_TP_INVALID_ANCHOR_CERT:
+        case CSSMERR_TP_NOT_TRUSTED:
+        case CSSMERR_TP_INVALID_CERT_AUTHORITY:
+            return "CERT_STATUS_AUTHORITY_INVALID";
+        case CSSMERR_TP_CERT_EXPIRED:
+        case CSSMERR_TP_CERT_NOT_VALID_YET:
+            // "Expired" and "not yet valid" collapse into a single status.
+            return "CERT_STATUS_DATE_INVALID";
+        case CSSMERR_TP_CERT_REVOKED:
+        case CSSMERR_TP_CERT_SUSPENDED:
+            return "CERT_STATUS_REVOKED";
+        case CSSMERR_APPLETP_HOSTNAME_MISMATCH:
+            return "CERT_STATUS_COMMON_NAME_INVALID";
+        case CSSMERR_APPLETP_CRL_NOT_FOUND:
+        case CSSMERR_APPLETP_OCSP_UNAVAILABLE:
+        case CSSMERR_APPLETP_INCOMPLETE_REVOCATION_CHECK:
+            return "CERT_STATUS_NO_REVOCATION_MECHANISM";
+        case CSSMERR_APPLETP_CRL_EXPIRED:
+        case CSSMERR_APPLETP_CRL_NOT_VALID_YET:
+        case CSSMERR_APPLETP_CRL_SERVER_DOWN:
+        case CSSMERR_APPLETP_CRL_NOT_TRUSTED:
+        case CSSMERR_APPLETP_CRL_INVALID_ANCHOR_CERT:
+        case CSSMERR_APPLETP_CRL_POLICY_FAIL:
+        case CSSMERR_APPLETP_OCSP_BAD_RESPONSE:
+        case CSSMERR_APPLETP_OCSP_BAD_REQUEST:
+        case CSSMERR_APPLETP_OCSP_STATUS_UNRECOGNIZED:
+        case CSSMERR_APPLETP_NETWORK_FAILURE:
+        case CSSMERR_APPLETP_OCSP_NOT_TRUSTED:
+        case CSSMERR_APPLETP_OCSP_INVALID_ANCHOR_CERT:
+        case CSSMERR_APPLETP_OCSP_SIG_ERROR:
+        case CSSMERR_APPLETP_OCSP_NO_SIGNER:
+        case CSSMERR_APPLETP_OCSP_RESP_MALFORMED_REQ:
+        case CSSMERR_APPLETP_OCSP_RESP_INTERNAL_ERR:
+        case CSSMERR_APPLETP_OCSP_RESP_TRY_LATER:
+        case CSSMERR_APPLETP_OCSP_RESP_SIG_REQUIRED:
+        case CSSMERR_APPLETP_OCSP_RESP_UNAUTHORIZED:
+        case CSSMERR_APPLETP_OCSP_NONCE_MISMATCH:
+            // We asked for a revocation check, but didn't get it.
+            return "CERT_STATUS_UNABLE_TO_CHECK_REVOCATION";
+        case CSSMERR_APPLETP_SSL_BAD_EXT_KEY_USE:
+            // TODO(wtc): Should we add CERT_STATUS_WRONG_USAGE?
+            return "CERT_STATUS_INVALID";
+        case CSSMERR_APPLETP_CRL_BAD_URI:
+        case CSSMERR_APPLETP_IDP_FAIL:
+            return "CERT_STATUS_INVALID";
+        case CSSMERR_CSP_UNSUPPORTED_KEY_SIZE:
+            // Mapping UNSUPPORTED_KEY_SIZE to CERT_STATUS_WEAK_KEY is not strictly
+            // accurate, as the error may have been returned due to a key size
+            // that exceeded the maximum supported. However, within
+            // CertVerifyProcMac::VerifyInternal(), this code should only be
+            // encountered as a certificate status code, and only when the key size
+            // is smaller than the minimum required (1024 bits).
+            return "CERT_STATUS_WEAK_KEY";
+        default: {
+            // Failure was due to something Chromium doesn't define a
+            // specific status for (such as basic constraints violation, or
+            // unknown critical extension)
+            // "Unknown error mapped to CERT_STATUS_INVALID";
+            return "CERT_STATUS_INVALID";
+        }
+    }
 }

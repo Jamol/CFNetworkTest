@@ -29,6 +29,7 @@ private:
 	bool tryHandleProxy(CFHTTPMessageRef responseHeader);
 	bool resumeRequestWithCredentials(CFHTTPAuthenticationRef authRef, CFDictionaryRef credentials);
     void modifySSLSettings();
+    void checkSSLResult();
     int doReadStream();
     void cleanup();
 	
@@ -36,14 +37,17 @@ private:
 	CFURLRef            m_urlRef;
 	CFHTTPMessageRef    m_messageRef;
 	CFReadStreamRef     m_readStreamRef;
+
+    CFReadStreamRef     m_reqBodyReadStream;
+    CFWriteStreamRef    m_reqBodyWriteStream;
     
     uint32_t            m_content_length;
     uint32_t            m_send_length;
-    CFReadStreamRef     m_reqBodyReadStream;
-    CFWriteStreamRef    m_reqBodyWriteStream;
 	
 	int                 m_nProxyState;
 	bool                m_shouldAutoredirect;
+    
+    bool                m_checkSSL;
 };
 
 #endif
